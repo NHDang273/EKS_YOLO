@@ -4,7 +4,8 @@
 # This script deploys infrastructure to EKS (without building Docker image)
 # Docker image will be built by GitHub Actions
 
-set -e
+# Don't exit on error - handle errors gracefully
+set +e
 
 echo "=========================================="
 echo "  YOLO EKS Infrastructure Deployment"
@@ -78,6 +79,15 @@ echo "Installing NVIDIA Device Plugin..."
 kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.0/nvidia-device-plugin.yml
 
 echo "Installing Metrics Server..."
+# Remove old Metrics Server if exists to avoid conflicts
+echo "Checking for existing Metrics Server..."
+if kubectl get deployment metrics-server -n kube-system &>/dev/null; then
+    echo "Removing old Metrics Server deployment..."
+    kubectl delete deployment metrics-server -n kube-system
+    kubectl delete apiservice v1beta1.metrics.k8s.io 2>/dev/null || true
+    sleep 5
+fi
+
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 
 sleep 20
