@@ -37,9 +37,16 @@ jobs:
           docker push $ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REPOSITORY:latest
 
-      - name: Upload model to S3
+      - name: Verify model exists in S3
         run: |
-          aws s3 cp models/best_Hai_03092025.pt s3://$S3_BUCKET/models/best.pt
+          echo "Checking if model exists in S3..."
+          if aws s3 ls s3://$S3_BUCKET/models/best.pt; then
+            echo "✓ Model found in S3"
+          else
+            echo "⚠ WARNING: Model not found in S3"
+            echo "Please upload model manually first:"
+            echo "aws s3 cp models/best.pt s3://$S3_BUCKET/models/best.pt"
+          fi
 
       - name: Update kubeconfig
         run: |

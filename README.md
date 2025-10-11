@@ -41,7 +41,7 @@ echo $ECR_URL
 
 **Environment Variables:**
 - `AWS_REGION`: ap-southeast-1
-- `CLUSTER_NAME`: ai-inference-prod
+- `CLUSTER_NAME`: yolo-eks-cluster
 - `ECR_REPO`: ai-inference
 - `S3_WEIGHTS_BUCKET`: ai-weights-{ACCOUNT_ID}
 - `S3_OUTPUT_BUCKET`: ai-outputs-{ACCOUNT_ID}
@@ -142,7 +142,7 @@ AWS_SECRET_ACCESS_KEY=<your-secret-key>
 AWS_REGION=ap-southeast-1
 ECR_REPOSITORY=<account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/ai-inference
 S3_MODEL_BUCKET=ai-weights-<account-id>
-EKS_CLUSTER_NAME=ai-inference-prod
+EKS_CLUSTER_NAME=yolo-eks-cluster
 ```
 
 ---
@@ -388,7 +388,7 @@ kubectl delete namespace yolo-inference
 ### Delete Entire Cluster
 
 ```bash
-eksctl delete cluster --name ai-inference-prod --region ap-southeast-1
+eksctl delete cluster --name yolo-eks-cluster --region ap-southeast-1
 ```
 
 ### Delete S3 & ECR
@@ -464,4 +464,4 @@ kubectl rollout history deployment/yolo-inference -n yolo-inference
 **Version**: 1.0
 **Last Updated**: 2025-10-11
 **Region**: ap-southeast-1
-**Cluster**: ai-inference-prod
+**Cluster**: yolo-eks-cluster

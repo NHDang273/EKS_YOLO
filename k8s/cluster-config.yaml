@@ -2,7 +2,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: ai-inference-prod
+  name: yolo-eks-cluster
   region: ap-southeast-1
   version: "1.28"
 
@@ -53,7 +53,7 @@ managedNodeGroups:
     tags:
       nodegroup-role: gpu-inference
       k8s.io/cluster-autoscaler/enabled: "true"
-      k8s.io/cluster-autoscaler/ai-inference-prod: "owned"
+      k8s.io/cluster-autoscaler/yolo-eks-cluster: "owned"
     ssh:
       allow: true
       # publicKeyPath: ~/.ssh/id_rsa.pub  # Uncomment and specify your SSH key
@@ -79,7 +79,7 @@ managedNodeGroups:
     tags:
       nodegroup-role: system
       k8s.io/cluster-autoscaler/enabled: "true"
-      k8s.io/cluster-autoscaler/ai-inference-prod: "owned"
+      k8s.io/cluster-autoscaler/yolo-eks-cluster: "owned"
 
 # Addons
 addons:
