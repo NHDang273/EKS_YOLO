@@ -7,8 +7,8 @@ export AWS_REGION=ap-southeast-1
 export CLUSTER_NAME=yolo-eks-cluster
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export ECR_REPO=ai-inference
-export S3_WEIGHTS_BUCKET=ai-weights-${AWS_ACCOUNT_ID}
-export S3_OUTPUT_BUCKET=ai-outputs-${AWS_ACCOUNT_ID}
+export S3_WEIGHTS_BUCKET=s3-eks-dang
+export S3_OUTPUT_BUCKET=s3-eks-dang
 export ECR_URL=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
 
 echo "=== Environment Variables ==="
@@ -28,8 +28,8 @@ export AWS_REGION=ap-southeast-1
 export CLUSTER_NAME=yolo-eks-cluster
 export AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 export ECR_REPO=ai-inference
-export S3_WEIGHTS_BUCKET=ai-weights-${AWS_ACCOUNT_ID}
-export S3_OUTPUT_BUCKET=ai-outputs-${AWS_ACCOUNT_ID}
+export S3_WEIGHTS_BUCKET=s3-eks-dang
+export S3_OUTPUT_BUCKET=s3-eks-dang
 export ECR_URL=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
 EOF
 
