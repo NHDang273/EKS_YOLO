@@ -16,9 +16,6 @@ iam:
     attachPolicyARNs:
     - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
     - arn:aws:iam::aws:policy/AmazonElasticFileSystemClientReadWriteAccess
-    wellKnownPolicies:
-      ebs: true
-      efs: true
 
 # VPC Configuration
 vpc:
@@ -56,7 +53,7 @@ managedNodeGroups:
       k8s.io/cluster-autoscaler/yolo-eks-cluster: "owned"
     ssh:
       allow: true
-      # publicKeyPath: ~/.ssh/id_rsa.pub  # Uncomment and specify your SSH key
+      publicKeyPath: AIV-dev2 # Uncomment and specify your SSH key
 
   # CPU Node Group for system workloads
   - name: cpu-nodes
@@ -93,14 +90,3 @@ addons:
     version: latest
     wellKnownPolicies:
       ebsCSIController: true
-
-# CloudWatch Logging
-cloudWatch:
-  clusterLogging:
-    enableTypes:
-      - api
-      - audit
-      - authenticator
-      - controllerManager
-      - scheduler
-    logRetentionInDays: 7
