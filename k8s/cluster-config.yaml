@@ -1,0 +1,106 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: ai-inference-prod
+  region: ap-southeast-1
+  version: "1.28"
+
+# IAM OIDC & Service Account
+iam:
+  withOIDC: true
+  serviceAccounts:
+  - metadata:
+      name: yolo-sa
+      namespace: yolo-inference
+    attachPolicyARNs:
+    - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+    - arn:aws:iam::aws:policy/AmazonElasticFileSystemClientReadWriteAccess
+    wellKnownPolicies:
+      ebs: true
+      efs: true
+
+# VPC Configuration
+vpc:
+  cidr: 10.0.0.0/16
+  nat:
+    gateway: Single
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+# Managed Node Groups
+managedNodeGroups:
+  # GPU Node Group for YOLO inference
+  - name: gpu-nodes
+    instanceType: g4dn.xlarge
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 5
+    volumeSize: 100
+    volumeType: gp3
+    amiFamily: AmazonLinux2
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        ebs: true
+        efs: true
+        albIngress: true
+        cloudWatch: true
+    labels:
+      role: gpu-worker
+      workload: yolo-inference
+    tags:
+      nodegroup-role: gpu-inference
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/ai-inference-prod: "owned"
+    ssh:
+      allow: true
+      # publicKeyPath: ~/.ssh/id_rsa.pub  # Uncomment and specify your SSH key
+
+  # CPU Node Group for system workloads
+  - name: cpu-nodes
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    volumeSize: 50
+    volumeType: gp3
+    amiFamily: AmazonLinux2
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        ebs: true
+        efs: true
+        cloudWatch: true
+    labels:
+      role: cpu-worker
+      workload: system
+    tags:
+      nodegroup-role: system
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/ai-inference-prod: "owned"
+
+# Addons
+addons:
+  - name: vpc-cni
+    version: latest
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+  - name: aws-ebs-csi-driver
+    version: latest
+    wellKnownPolicies:
+      ebsCSIController: true
+
+# CloudWatch Logging
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator
+      - controllerManager
+      - scheduler
+    logRetentionInDays: 7

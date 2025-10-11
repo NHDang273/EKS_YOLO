@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yolo-inference
+  namespace: yolo-inference
+  labels:
+    app: yolo-inference
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: yolo-inference
+  template:
+    metadata:
+      labels:
+        app: yolo-inference
+    spec:
+      serviceAccountName: yolo-sa
+
+      # Init container to download model from S3 to EFS
+      initContainers:
+      - name: model-downloader
+        image: amazon/aws-cli:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Checking for model in EFS..."
+          if [ ! -f /models/best.pt ]; then
+            echo "Model not found. Downloading from S3..."
+            aws s3 cp s3://${S3_BUCKET}/${S3_MODEL_KEY} /models/best.pt
+            echo "Model downloaded successfully"
+          else
+            echo "Model exists. Checking for updates..."
+            # Download anyway to ensure latest version
+            aws s3 cp s3://${S3_BUCKET}/${S3_MODEL_KEY} /models/best.pt
+            echo "Model updated successfully"
+          fi
+
+          # Set proper permissions
+          chmod 644 /models/best.pt
+          echo "Model is ready at /models/best.pt"
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        env:
+        - name: S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: S3_BUCKET
+        - name: S3_MODEL_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: S3_MODEL_KEY
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: AWS_REGION
+
+      containers:
+      - name: yolo-inference
+        # Replace with your ECR repository URL
+        image: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/yolo-inference:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+
+        resources:
+          limits:
+            nvidia.com/gpu: 1  # Request 1 GPU
+            memory: "8Gi"
+            cpu: "4"
+          requests:
+            nvidia.com/gpu: 1
+            memory: "4Gi"
+            cpu: "2"
+
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true  # Read-only for model weights
+        - name: output
+          mountPath: /output
+          readOnly: false  # Read-write for shared output
+        - name: tmp
+          mountPath: /tmp
+
+        env:
+        - name: MODEL_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: MODEL_PATH
+        - name: OUTPUT_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: OUTPUT_PATH
+        - name: CUDA_VISIBLE_DEVICES
+          valueFrom:
+            configMapKeyRef:
+              name: yolo-config
+              key: CUDA_VISIBLE_DEVICES
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: efs-models-claim
+      - name: output
+        persistentVolumeClaim:
+          claimName: efs-output-claim
+      - name: tmp
+        emptyDir: {}
+
+      # Schedule pods on GPU nodes
+      nodeSelector:
+        node.kubernetes.io/instance-type: g4dn.xlarge
+
+      # Tolerate GPU taints
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+      # Anti-affinity to spread pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - yolo-inference
+              topologyKey: kubernetes.io/hostname

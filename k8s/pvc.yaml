@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: efs-models-claim
+  namespace: yolo-inference
+spec:
+  accessModes:
+    - ReadWriteMany  # Multiple pods can read/write
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: efs-output-claim
+  namespace: yolo-inference
+spec:
+  accessModes:
+    - ReadWriteMany  # Share output between all pods
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 50Gi
