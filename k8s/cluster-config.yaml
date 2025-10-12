@@ -51,9 +51,10 @@ managedNodeGroups:
       nodegroup-role: gpu-inference
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/yolo-eks-cluster: "owned"
-    ssh:
-      allow: true
-      publicKeyPath: AIV-dev2 # Uncomment and specify your SSH key
+    # Uncomment ssh if needed
+    # ssh:
+    #   allow: true
+    #   publicKeyPath: ~/.ssh/id_rsa.pub
 
   # CPU Node Group for system workloads
   - name: cpu-nodes
