@@ -6,7 +6,7 @@ metadata:
   labels:
     app: yolo-inference
 spec:
-  replicas: 3
+  replicas: 2  # Changed from 3 to 2 (fit 2 GPU nodes)
   selector:
     matchLabels:
       app: yolo-inference
@@ -62,8 +62,8 @@ spec:
 
       containers:
       - name: yolo-inference
-        # Replace with your ECR repository URL
-        image: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/yolo-inference:latest
+        # FIXED: Removed /yolo-inference from image URL
+        image: 688567276212.dkr.ecr.ap-southeast-1.amazonaws.com/ai-inference:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -73,11 +73,11 @@ spec:
           limits:
             nvidia.com/gpu: 1  # Request 1 GPU
             memory: "8Gi"
-            cpu: "4"
+            cpu: "2"  # Changed from 4 to 2
           requests:
             nvidia.com/gpu: 1
             memory: "4Gi"
-            cpu: "2"
+            cpu: "1"  # Changed from 2 to 1
 
         volumeMounts:
         - name: models

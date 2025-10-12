@@ -33,7 +33,19 @@ kubectl get nodes || {
 }
 
 echo ""
-echo "=== Step 2: Creating EFS File System ==="
+echo "=== Step 2: Checking IAM Role for Service Account ==="
+
+# Check if IAM role exists
+ROLE_EXISTS=$(aws iam get-role --role-name yolo-eks-pod-role 2>/dev/null | wc -l)
+if [ "$ROLE_EXISTS" -eq "0" ]; then
+    echo "⚠️  IAM role not found. Please run ./setup-iam.sh first!"
+    exit 1
+else
+    echo "✓ IAM Role exists: yolo-eks-pod-role"
+fi
+
+echo ""
+echo "=== Step 3: Creating EFS File System ==="
 VPC_ID=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.vpcId' --output text)
 echo "VPC: $VPC_ID"
 
@@ -65,7 +77,7 @@ done
 echo "✓ EFS created"
 
 echo ""
-echo "=== Step 3: Installing Kubernetes Addons ==="
+echo "=== Step 4: Installing Kubernetes Addons ==="
 
 helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver/ 2>/dev/null || true
 helm repo update
@@ -94,7 +106,7 @@ sleep 20
 echo "✓ Addons installed"
 
 echo ""
-echo "=== Step 4: Updating Kubernetes Manifests ==="
+echo "=== Step 5: Updating Kubernetes Manifests ==="
 
 sed -i "s/fs-XXXXXXXXX/${EFS_ID}/g" k8s/storageclass.yaml
 sed -i "s/ACCOUNT_ID/${AWS_ACCOUNT_ID}/g" k8s/serviceaccount.yaml
@@ -105,13 +117,14 @@ sed -i "s/us-west-2/${AWS_REGION}/g" k8s/configmap.yaml
 echo "✓ Manifests updated"
 
 echo ""
-echo "=== Step 5: Deploying to EKS ==="
+echo "=== Step 6: Deploying to EKS ==="
 
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/storageclass.yaml
 kubectl apply -f k8s/pvc.yaml
 kubectl apply -f k8s/serviceaccount.yaml
 kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/hpa.yaml
 

@@ -7,9 +7,11 @@ parameters:
   provisioningMode: efs-ap
   # Replace fs-XXXXXXXXX with your EFS file system ID
   fileSystemId: fs-XXXXXXXXX
-  directoryPerms: "777"
+  directoryPerms: "700"
   gidRangeStart: "1000"
   gidRangeEnd: "2000"
-  basePath: "/yolo"
+  basePath: "/"
+  uid: "1000"
+  gid: "1000"
 mountOptions:
   - tls

@@ -5,14 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-  S3_BUCKET: ${{ secrets.S3_MODEL_BUCKET }}
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -22,7 +18,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -30,31 +26,52 @@ jobs:
 
       - name: Build and push Docker image
         env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REPOSITORY:latest
-          docker push $ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REPOSITORY:latest
+          echo "Building Docker image..."
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "Pushing to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "✓ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
       - name: Verify model exists in S3
         run: |
           echo "Checking if model exists in S3..."
-          if aws s3 ls s3://$S3_BUCKET/models/best.pt; then
+          if aws s3 ls s3://${{ secrets.S3_MODEL_BUCKET }}/models/best.pt; then
             echo "✓ Model found in S3"
           else
             echo "⚠ WARNING: Model not found in S3"
-            echo "Please upload model manually first:"
-            echo "aws s3 cp models/best.pt s3://$S3_BUCKET/models/best.pt"
+            echo "Please upload model manually:"
+            echo "aws s3 cp models/best.pt s3://${{ secrets.S3_MODEL_BUCKET }}/models/best.pt"
           fi
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region $AWS_REGION
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
       - name: Deploy to EKS
         env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          kubectl set image deployment/yolo-inference yolo-inference=$ECR_REPOSITORY:$IMAGE_TAG -n yolo-inference
-          kubectl rollout status deployment/yolo-inference -n yolo-inference
+          echo "Deploying to EKS..."
+          kubectl set image deployment/yolo-inference \
+            yolo-inference=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -n yolo-inference
+          
+          echo "Waiting for rollout..."
+          kubectl rollout status deployment/yolo-inference -n yolo-inference --timeout=5m
+          
+          echo "✓ Deployment complete!"
+          
+      - name: Get service endpoint
+        run: |
+          echo "Getting LoadBalancer URL..."
+          kubectl get svc yolo-service -n yolo-inference
