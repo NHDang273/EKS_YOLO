@@ -5,11 +5,11 @@ metadata:
   namespace: yolo-inference
 data:
   # S3 bucket where models are stored
-  S3_BUCKET: "yolo-models-bucket"
+  S3_BUCKET: "s3-eks-dang"
   S3_MODEL_KEY: "models/best.pt"
 
   # AWS Region
-  AWS_REGION: "us-west-2"
+  AWS_REGION: "ap-southeast-1"
 
   # Path to model file in EFS (mounted from S3)
   MODEL_PATH: "/models/best.pt"

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: yolo-inference
 spec:
-  replicas: 4  # Multiple pods can share same GPU node
+  replicas: 2  # Start with 2 pods on 1 GPU node
   selector:
     matchLabels:
       app: yolo-inference

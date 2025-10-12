@@ -53,3 +53,18 @@ Thumbs.db
 # Test files
 test_*.jpg
 test_*.png
+
+# Stress test images
+stress-test/test-images/*
+!stress-test/test-images/.gitkeep
+
+# Temporary config files
+*-temp.json
+aws-auth-current.yaml
+*.kubeconfig
+
+# Secrets
+*.key
+*.pem
+credentials.json
+.env

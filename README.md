@@ -1,467 +1,426 @@
-# YOLO Inference on AWS EKS
+# YOLO Inference on Amazon EKS with Auto-Scaling
 
-Deploy YOLO inference application lên AWS EKS với GitHub Actions CI/CD pipeline.
+Production-ready YOLOv8 object detection service on Amazon EKS with GPU auto-scaling.
 
-## 🏗️ Kiến trúc
+## 🚀 Features
 
-```
-GitHub → GitHub Actions → ECR (Docker Image) + S3 (Model)
-                              ↓
-                         EKS Cluster
-                              ↓
-                    ┌─────────┴─────────┐
-                    ↓                   ↓
-               EFS (Models)        Pods (shared data)
-                    ↑                   ↓
-          S3 Model → Init Container downloads
-```
-
-### Components:
-- **GitHub Actions**: CI/CD pipeline tự động build và deploy
-- **ECR**: Container registry cho Docker images
-- **S3**: Storage cho model weights
-- **EFS**: Shared file system cho models và outputs giữa các pods
-- **EKS**: Kubernetes cluster với GPU nodes (g4dn.xlarge)
-
----
-
-## 🚀 Quick Start
-
-### 1. Setup Environment
-
-```bash
-# Run setup script
-source setup-env.sh
-
-# Verify environment
-echo $AWS_REGION
-echo $CLUSTER_NAME
-echo $ECR_URL
-```
-
-**Environment Variables:**
-- `AWS_REGION`: ap-southeast-1
-- `CLUSTER_NAME`: yolo-eks-cluster
-- `ECR_REPO`: ai-inference
-- `S3_WEIGHTS_BUCKET`: ai-weights-{ACCOUNT_ID}
-- `S3_OUTPUT_BUCKET`: ai-outputs-{ACCOUNT_ID}
-
-### 2. Check Infrastructure
-
-```bash
-# Run infrastructure check
-./check-infra.sh
-```
-
-Script sẽ kiểm tra:
-- ✓ EKS Cluster status
-- ✓ ECR Repository
-- ✓ S3 Buckets
-- ✓ EFS File System
-- ✓ Kubernetes connection
-- ✓ Required addons (EFS CSI, NVIDIA plugin, Metrics server)
-
-### 3. Deploy Application
-
-**Application được deploy tự động qua GitHub Actions khi push code.**
-
-Workflow sẽ:
-1. Build Docker image → Push to ECR
-2. Upload model weights → Push to S3
-3. Update Kubernetes deployment
-
----
+- ⚡ **GPU-accelerated inference** - NVIDIA T4 (g4dn.xlarge)
+- 📈 **Auto-scaling** - HPA + Cluster Autoscaler
+- 🐳 **Containerized** - Docker + ECR
+- 🔄 **CI/CD** - GitHub Actions
+- 💾 **Shared storage** - EFS for models
+- 🔐 **Secure** - IAM Roles for Service Accounts (IRSA)
 
 ## 📁 Project Structure
 
 ```
 yolo_eks/
-├── .github/workflows/
-│   └── deploy.yml              # GitHub Actions CI/CD
-├── k8s/
-│   ├── namespace.yaml          # Namespace
-│   ├── serviceaccount.yaml     # Service Account với IRSA
-│   ├── storageclass.yaml       # EFS Storage Class
-│   ├── pvc.yaml                # PVCs cho models và output
-│   ├── configmap.yaml          # Configuration
-│   ├── deployment.yaml         # Deployment với init container
-│   ├── service.yaml            # LoadBalancer Service
-│   └── hpa.yaml                # Horizontal Pod Autoscaler
-├── cluster-config.yaml         # EKS cluster configuration
-├── setup-env.sh                # Setup environment variables
-├── check-infra.sh              # Check infrastructure status
-├── main.py                     # FastAPI application
-├── Dockerfile                  # Container image definition
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
+├── main.py                      # FastAPI application
+├── Dockerfile                   # Container definition
+├── requirements.txt
+├── README.md                    # This file
+│
+├── k8s/                         # Kubernetes manifests
+│   ├── cluster-config.yaml      # EKS cluster setup
+│   ├── deployment.yaml          # YOLO deployment
+│   ├── service.yaml             # LoadBalancer
+│   ├── hpa.yaml                 # Horizontal Pod Autoscaler
+│   ├── cluster-autoscaler.yaml  # Cluster Autoscaler
+│   ├── configmap.yaml
+│   ├── serviceaccount.yaml
+│   ├── pvc.yaml
+│   ├── storageclass.yaml
+│   └── iam-*.json
+│
+├── scripts/                     # Setup & deployment scripts
+│   ├── 1-setup-cluster.sh       # Create EKS cluster
+│   ├── 2-setup-iam.sh           # Setup IAM roles
+│   ├── 3-setup-github.sh        # GitHub Actions access
+│   ├── 4-deploy.sh              # Deploy infrastructure
+│   └── 5-update.sh              # Update deployment
+│
+├── stress-test/                 # Load testing
+│   ├── test.py                  # Stress test script
+│   ├── monitor.sh               # Monitor auto-scaling
+│   └── test-images/             # Place test images here
+│
+└── .github/workflows/
+    └── deploy.yml               # CI/CD pipeline
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+GitHub → ECR → EKS Cluster
+                ├── GPU Nodes (g4dn.xlarge)
+                │   ├── Pod 1 ──┐
+                │   ├── Pod 2 ──┼── Share GPU
+                │   └── Pod N ──┘
+                ├── LoadBalancer Service
+                ├── EFS (Model Storage)
+                └── S3 (Model Source)
+```
+
+### Auto-Scaling Flow:
+1. **Low load** → 1 GPU node, 2 pods
+2. **Medium load** → HPA scales to 4-5 pods on same node (~30s)
+3. **High load** → Node full → Cluster Autoscaler adds GPU node (~3-5 min)
+4. **Scale down** → After 5 min idle → Remove pods → Remove nodes
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- AWS Account with EKS permissions
+- `kubectl`, `eksctl`, `aws-cli`, `helm` installed
+- Docker installed
+
+### 1️⃣ Create EKS Cluster
+
+```bash
+# Create cluster (takes ~15-20 min)
+eksctl create cluster -f k8s/cluster-config.yaml
+
+# Verify
+kubectl get nodes
+```
+
+### 2️⃣ Setup IAM Permissions
+
+```bash
+cd scripts
+./2-setup-iam.sh
+```
+
+This creates:
+- OIDC provider for EKS
+- IAM role with S3 read access
+- Attaches role to service account
+
+### 3️⃣ Setup GitHub Actions
+
+```bash
+./3-setup-github.sh
+```
+
+Add these secrets to GitHub:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION=ap-southeast-1`
+- `ECR_REPOSITORY=yolo-test`
+- `EKS_CLUSTER_NAME=yolo-inference-cluster`
+- `S3_MODEL_BUCKET=s3-eks-dang`
+
+### 4️⃣ Deploy Infrastructure
+
+```bash
+./4-deploy.sh
+```
+
+Creates:
+- EFS file system
+- Namespace, PVC, ConfigMap
+- Deployment, Service, HPA
+- Cluster Autoscaler
+
+### 5️⃣ Get Service URL
+
+```bash
+kubectl get svc yolo-service -n yolo-inference
+
+# Output:
+# NAME           TYPE           CLUSTER-IP      EXTERNAL-IP                        PORT(S)
+# yolo-service   LoadBalancer   10.100.x.x      a1f82be55d1484dbc95968c2fe8e-...   80:30655/TCP
+```
+
+---
+
+## 🔄 Update Deployment
+
+After pulling new code:
+
+```bash
+git pull origin main
+cd scripts
+./5-update.sh
+```
+
+---
+
+## 🧪 Stress Test & Monitor
+
+### Prepare Test Images
+
+```bash
+# Copy your test images
+cp /path/to/images/*.jpg stress-test/test-images/
+```
+
+### Run Load Test
+
+```bash
+cd stress-test
+
+# Terminal 1: Monitor auto-scaling
+./monitor.sh
+
+# Terminal 2: Run stress test
+LB_URL=$(kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+python test.py \
+  --url "http://$LB_URL" \
+  --images test-images \
+  --concurrent 15 \
+  --total 150
+```
+
+### Expected Output
+
+```
+📊 Results:
+   Total: 150 requests
+   ✅ Success: 148 (98.7%)
+   ⏱️  Avg time: 1.23s
+
+🎯 Pod distribution:
+   pod-1: 37 requests (25%)
+   pod-2: 38 requests (25.3%)
+   pod-3: 36 requests (24%)
+   pod-4: 37 requests (24.7%)
+```
+
+---
+
+## 📡 API Usage
+
+### Health Check
+```bash
+curl http://$LB_URL/health
+```
+
+### Predict
+```bash
+curl -X POST \
+  -F "file=@test.jpg" \
+  http://$LB_URL/predict
+```
+
+Response:
+```json
+{
+  "success": true,
+  "detections": [
+    {"class": "person", "confidence": 0.92, "bbox": [...]},
+    {"class": "car", "confidence": 0.87, "bbox": [...]}
+  ],
+  "pod_name": "yolo-inference-xxx-yyy",
+  "inference_time": 0.045
+}
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Pods not starting
+```bash
+kubectl describe pod <pod-name> -n yolo-inference
+kubectl logs <pod-name> -n yolo-inference -c model-downloader  # Init container
+kubectl logs <pod-name> -n yolo-inference -c yolo-inference     # Main container
+```
+
+### S3 Access Denied (403)
+```bash
+# Check IAM role
+kubectl describe sa yolo-sa -n yolo-inference
+
+# Verify policy
+aws iam list-attached-role-policies --role-name yolo-eks-pod-role
+
+# Attach S3 read policy
+aws iam attach-role-policy \
+  --role-name yolo-eks-pod-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+```
+
+### Auto-scaling not working
+```bash
+# Check HPA
+kubectl get hpa -n yolo-inference
+kubectl describe hpa yolo-hpa -n yolo-inference
+
+# Check metrics-server
+kubectl get pods -n kube-system | grep metrics-server
+
+# Check Cluster Autoscaler logs
+kubectl logs -n kube-system -l app=cluster-autoscaler --tail=50
+```
+
+### EFS mount issues
+```bash
+# Check PVC
+kubectl get pvc -n yolo-inference
+
+# Check EFS CSI driver
+kubectl get pods -n kube-system | grep efs-csi
 ```
 
 ---
 
 ## 🔧 Configuration
 
-### Update Kubernetes Manifests
-
-Trước khi deploy, cần update các placeholders:
-
-#### 1. StorageClass ([k8s/storageclass.yaml](k8s/storageclass.yaml))
-```bash
-# Get EFS ID
-EFS_ID=$(aws efs describe-file-systems --region $AWS_REGION --query "FileSystems[0].FileSystemId" --output text)
-
-# Update file
-sed -i "s/fs-XXXXXXXXX/${EFS_ID}/g" k8s/storageclass.yaml
-```
-
-#### 2. ServiceAccount ([k8s/serviceaccount.yaml](k8s/serviceaccount.yaml))
-```bash
-# Update with your AWS Account ID
-sed -i "s/ACCOUNT_ID/${AWS_ACCOUNT_ID}/g" k8s/serviceaccount.yaml
-```
-
-#### 3. Deployment ([k8s/deployment.yaml](k8s/deployment.yaml))
-```bash
-# Update ECR URL
-sed -i "s|ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com|${ECR_URL}|g" k8s/deployment.yaml
-```
-
-#### 4. ConfigMap ([k8s/configmap.yaml](k8s/configmap.yaml))
-```bash
-# Update S3 bucket and region
-sed -i "s/yolo-models-bucket/${S3_WEIGHTS_BUCKET}/g" k8s/configmap.yaml
-sed -i "s/us-west-2/${AWS_REGION}/g" k8s/configmap.yaml
-```
-
-### GitHub Secrets
-
-Thêm các secrets vào GitHub repository (Settings → Secrets and variables → Actions):
+### Scale Manually
 
 ```bash
-AWS_ACCESS_KEY_ID=<your-access-key>
-AWS_SECRET_ACCESS_KEY=<your-secret-key>
-AWS_REGION=ap-southeast-1
-ECR_REPOSITORY=<account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/ai-inference
-S3_MODEL_BUCKET=ai-weights-<account-id>
-EKS_CLUSTER_NAME=yolo-eks-cluster
+# Scale pods
+kubectl scale deployment yolo-inference -n yolo-inference --replicas=6
+
+# Scale GPU nodes
+eksctl scale nodegroup gpu-nodes \
+  --cluster yolo-inference-cluster \
+  --region ap-southeast-1 \
+  --nodes 2
 ```
 
----
+### Update HPA Thresholds
 
-## 📦 Deployment Flow
+Edit `k8s/hpa.yaml`:
+```yaml
+metrics:
+- type: Resource
+  resource:
+    name: cpu
+    target:
+      type: Utilization
+      averageUtilization: 70  # Change this
+```
 
-### GitHub Actions Workflow
-
-Khi push code lên branch `main`:
-
-1. **Build & Push Docker Image**
-   ```
-   Docker build → Tag → Push to ECR
-   ```
-
-2. **Upload Model Weights**
-   ```
-   models/best_Hai_03092025.pt → S3 bucket
-   ```
-
-3. **Deploy to EKS**
-   ```
-   Update deployment → Rolling update pods
-   ```
-
-### Init Container Flow
-
-Mỗi pod khi start:
-
-1. **Init Container** chạy trước main container
-2. Download model từ S3 → EFS `/models`
-3. Main container start, đọc model từ EFS (read-only)
-4. Results được ghi vào EFS `/output` (shared giữa các pods)
-
----
-
-## 🧪 Testing
-
-### Get LoadBalancer URL
-
+Apply:
 ```bash
-LB_URL=$(kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-echo $LB_URL
-```
-
-### API Endpoints
-
-#### 1. Health Check
-```bash
-curl http://$LB_URL/health
-```
-
-Response:
-```json
-{
-  "status": "healthy",
-  "model_path": "/models/best.pt",
-  "pod_name": "yolo-inference-xxx",
-  "output_path": "/output"
-}
-```
-
-#### 2. Inference
-```bash
-curl -X POST http://$LB_URL/predict \
-  -F "file=@test_image.jpg"
-```
-
-Response:
-```json
-{
-  "success": true,
-  "detections": [...],
-  "count": 5,
-  "pod_name": "yolo-inference-xxx",
-  "output_file": "/output/result_xxx.json"
-}
-```
-
-#### 3. List All Outputs (Shared)
-```bash
-curl http://$LB_URL/outputs
-```
-
-Response - shows outputs from ALL pods (shared EFS):
-```json
-{
-  "success": true,
-  "total_files": 150,
-  "files": [
-    {
-      "filename": "result_pod1_20251011_123456.json",
-      "size": 2048,
-      "modified": "2025-10-11T12:34:56"
-    }
-  ],
-  "pod_name": "yolo-inference-yyy"
-}
+kubectl apply -f k8s/hpa.yaml
 ```
 
 ---
 
 ## 📊 Monitoring
 
-### View Pods Status
-
 ```bash
 # Watch pods
-kubectl get pods -n yolo-inference -w
+watch kubectl get pods -n yolo-inference -o wide
 
-# Pod details
-kubectl describe pod <pod-name> -n yolo-inference
+# Watch HPA
+watch kubectl get hpa -n yolo-inference
 
-# Check GPU allocation
-kubectl get nodes -o json | jq '.items[].status.allocatable'
-```
+# Watch nodes
+watch kubectl get nodes
 
-### View Logs
+# Pod logs
+kubectl logs -f -n yolo-inference -l app=yolo-inference
 
-```bash
-# All pods logs
-kubectl logs -f deployment/yolo-inference -n yolo-inference
-
-# Specific pod
-kubectl logs -f <pod-name> -n yolo-inference
-
-# Init container logs
-kubectl logs <pod-name> -n yolo-inference -c model-downloader
-```
-
-### View Metrics
-
-```bash
-# Pod metrics (CPU, Memory)
-kubectl top pods -n yolo-inference
-
-# Node metrics
-kubectl top nodes
-
-# HPA status
-kubectl get hpa -n yolo-inference
-```
-
-### Check Shared EFS
-
-```bash
-# Exec into pod
-POD=$(kubectl get pods -n yolo-inference -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -it $POD -n yolo-inference -- bash
-
-# Inside pod
-ls -la /models      # Model weights (read-only)
-ls -la /output      # Shared outputs (read-write)
+# Autoscaler logs
+kubectl logs -f -n kube-system -l app=cluster-autoscaler
 ```
 
 ---
 
-## 🔄 Scaling
+## 🧹 Cleanup & Restart
 
-### Manual Scaling
-
-```bash
-# Scale to 5 replicas
-kubectl scale deployment yolo-inference --replicas=5 -n yolo-inference
-```
-
-### Auto Scaling (HPA)
-
-HPA automatically scales based on CPU/Memory:
-
-```yaml
-minReplicas: 2
-maxReplicas: 10
-targetCPU: 70%
-targetMemory: 80%
-```
-
-Check HPA:
-```bash
-kubectl get hpa -n yolo-inference
-```
-
----
-
-## 🛠️ Troubleshooting
-
-### Pods không start
+### Delete Cluster
 
 ```bash
-# Check events
-kubectl describe pod <pod-name> -n yolo-inference
-
-# Check logs
-kubectl logs <pod-name> -n yolo-inference
+# Delete entire cluster (takes ~10-15 min)
+eksctl delete cluster --name yolo-inference-cluster --region ap-southeast-1
 ```
 
-### EFS mount issues
+This removes:
+- All nodes (GPU + CPU)
+- LoadBalancer
+- EFS file system
+- VPC resources
 
+### Start Fresh - Complete Setup Flow
+
+After deleting, to start from scratch:
+
+#### **Step 1: Create Cluster** (~15-20 min)
 ```bash
-# Check PVC status
-kubectl get pvc -n yolo-inference
-
-# Check storage class
-kubectl describe sc efs-sc
-
-# Verify EFS mount targets
-aws efs describe-mount-targets --file-system-id $EFS_ID
+eksctl create cluster -f k8s/cluster-config.yaml
 ```
 
-### Model không download được
-
+#### **Step 2: Setup IAM** (~2 min)
 ```bash
-# Check init container logs
-kubectl logs <pod-name> -n yolo-inference -c model-downloader
-
-# Verify S3 bucket
-aws s3 ls s3://$S3_WEIGHTS_BUCKET/models/
-
-# Check IAM permissions
-kubectl describe sa yolo-sa -n yolo-inference
+cd scripts
+./setup-iam.sh
 ```
 
-### GPU không available
+Creates:
+- OIDC provider
+- IAM role with S3 access
+- Service account binding
 
+#### **Step 3: Deploy Infrastructure** (~5 min)
 ```bash
-# Check NVIDIA plugin
-kubectl get pods -n kube-system -l name=nvidia-device-plugin-ds
-
-# Check node labels
-kubectl get nodes --show-labels | grep gpu
+./deploy.sh
 ```
 
----
+Deploys in order:
+1. Namespace → StorageClass → PVC (creates EFS)
+2. ServiceAccount → ConfigMap
+3. Deployment (init container downloads model from S3)
+4. Service (creates LoadBalancer ~2-3 min)
+5. HPA + Cluster Autoscaler
 
-## 🧹 Cleanup
-
-### Delete Application Only
-
+#### **Step 4: Get LoadBalancer URL**
 ```bash
-kubectl delete namespace yolo-inference
+kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
-### Delete Entire Cluster
+**Total time: ~35-40 minutes**
+
+### Optional: Delete Other Resources
 
 ```bash
-eksctl delete cluster --name yolo-eks-cluster --region ap-southeast-1
-```
-
-### Delete S3 & ECR
-
-```bash
-# Delete S3 buckets
-aws s3 rb s3://$S3_WEIGHTS_BUCKET --force
-aws s3 rb s3://$S3_OUTPUT_BUCKET --force
-
 # Delete ECR repo
-aws ecr delete-repository --repository-name $ECR_REPO --force --region $AWS_REGION
+aws ecr delete-repository --repository-name yolo-test --region ap-southeast-1 --force
+
+# Delete S3 bucket (optional)
+aws s3 rb s3://s3-eks-dang --force
 ```
-
----
-
-## 📚 Documentation
-
-- [README-DEPLOYMENT.md](README-DEPLOYMENT.md) - Chi tiết deployment
-- [cluster-config.yaml](cluster-config.yaml) - EKS cluster configuration
-- [k8s/](k8s/) - Kubernetes manifests
-
----
-
-## 🔗 Useful Commands
-
-```bash
-# Port forward to test locally
-kubectl port-forward svc/yolo-service 8000:80 -n yolo-inference
-curl http://localhost:8000/health
-
-# Update deployment image
-kubectl set image deployment/yolo-inference yolo-inference=$ECR_URL:latest -n yolo-inference
-
-# Rollback deployment
-kubectl rollout undo deployment/yolo-inference -n yolo-inference
-
-# Restart all pods
-kubectl rollout restart deployment/yolo-inference -n yolo-inference
-
-# Check deployment history
-kubectl rollout history deployment/yolo-inference -n yolo-inference
-```
-
----
-
-## 💰 Cost Estimate
-
-**Monthly cost** (ap-southeast-1):
-- EKS Cluster: ~$73/month
-- g4dn.xlarge x2: ~$310/month (24/7)
-- t3.medium x2: ~$60/month
-- EFS: ~$3-5/month (10GB)
-- S3: ~$1/month
-- **Total: ~$450/month**
-
-**Cost optimization:**
-- Scale down GPU nodes khi không dùng
-- Sử dụng Spot Instances
-- Schedule pods (chỉ chạy giờ làm việc)
 
 ---
 
 ## 📝 Notes
 
-- **EFS Performance**: Sử dụng Provisioned Throughput nếu cần hiệu năng cao hơn
-- **Security**: Pods chạy với non-root user (UID 1000)
-- **Model Updates**: Mỗi lần push code, model cũng được sync từ S3
-- **Shared Output**: Tất cả pods ghi vào cùng EFS `/output`
-- **Init Container**: Đảm bảo model luôn được download trước khi pod start
+- **GPU Sharing**: Pods don't request GPU explicitly, allowing multiple pods per GPU
+- **Init Container**: Downloads model from S3 to EFS on first run
+- **Storage**: EFS for persistent model storage, S3 as source
+- **Security**: Pods run as non-root user, IAM roles via IRSA
+- **Cost**: ~$0.50/hour per g4dn.xlarge GPU node
 
 ---
 
-**Version**: 1.0
-**Last Updated**: 2025-10-11
-**Region**: ap-southeast-1
-**Cluster**: yolo-eks-cluster
+## 📚 Additional Resources
+
+- [EKS Documentation](https://docs.aws.amazon.com/eks/)
+- [Cluster Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler)
+- [NVIDIA Device Plugin](https://github.com/NVIDIA/k8s-device-plugin)
+- [YOLOv8 Documentation](https://docs.ultralytics.com/)
+
+---
+
+## 🤝 Contributing
+
+1. Fork repository
+2. Create feature branch
+3. Make changes
+4. Test locally
+5. Submit pull request
+
+---
+
+## 📄 License
+
+MIT License
