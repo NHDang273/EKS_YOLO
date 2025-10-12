@@ -25,21 +25,38 @@ spec:
         - /bin/sh
         - -c
         - |
+          set -e  # Exit on any error
           echo "Checking for model in EFS..."
+
           if [ ! -f /models/best.pt ]; then
             echo "Model not found. Downloading from S3..."
-            aws s3 cp s3://${S3_BUCKET}/${S3_MODEL_KEY} /models/best.pt
-            echo "Model downloaded successfully"
+            if aws s3 cp s3://${S3_BUCKET}/${S3_MODEL_KEY} /models/best.pt; then
+              echo "✓ Model downloaded successfully"
+            else
+              echo "✗ Failed to download model from S3"
+              exit 1
+            fi
           else
-            echo "Model exists. Checking for updates..."
-            # Download anyway to ensure latest version
-            aws s3 cp s3://${S3_BUCKET}/${S3_MODEL_KEY} /models/best.pt
-            echo "Model updated successfully"
+            echo "Model exists in EFS. Skipping download."
           fi
+
+          # Verify file exists and is not empty
+          if [ ! -f /models/best.pt ]; then
+            echo "✗ Error: /models/best.pt does not exist"
+            exit 1
+          fi
+
+          FILE_SIZE=$(stat -f%z /models/best.pt 2>/dev/null || stat -c%s /models/best.pt 2>/dev/null)
+          if [ "$FILE_SIZE" -eq "0" ]; then
+            echo "✗ Error: /models/best.pt is empty"
+            exit 1
+          fi
+
+          echo "✓ Model file verified: ${FILE_SIZE} bytes"
 
           # Set proper permissions
           chmod 644 /models/best.pt
-          echo "Model is ready at /models/best.pt"
+          echo "✓ Model is ready at /models/best.pt"
         volumeMounts:
         - name: models
           mountPath: /models
@@ -62,8 +79,8 @@ spec:
 
       containers:
       - name: yolo-inference
-        # FIXED: Removed /yolo-inference from image URL
-        image: 688567276212.dkr.ecr.ap-southeast-1.amazonaws.com/ai-inference:latest
+        # Using yolo-test repo (actual ECR repo name)
+        image: 688567276212.dkr.ecr.ap-southeast-1.amazonaws.com/yolo-test:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

@@ -61,14 +61,25 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Deploying to EKS..."
+          echo "Checking deployment exists..."
+          if ! kubectl get deployment yolo-inference -n yolo-inference 2>/dev/null; then
+            echo "⚠️  Deployment not found! Please run ./deploy.sh first to create infrastructure"
+            exit 1
+          fi
+
+          echo "Updating deployment image..."
           kubectl set image deployment/yolo-inference \
             yolo-inference=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -n yolo-inference
-          
-          echo "Waiting for rollout..."
-          kubectl rollout status deployment/yolo-inference -n yolo-inference --timeout=5m
-          
+
+          echo "Waiting for rollout (10 min timeout)..."
+          kubectl rollout status deployment/yolo-inference -n yolo-inference --timeout=10m
+
+          echo ""
+          echo "Getting pod status..."
+          kubectl get pods -n yolo-inference -l app=yolo-inference
+
+          echo ""
           echo "✓ Deployment complete!"
           
       - name: Get service endpoint
