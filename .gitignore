@@ -41,7 +41,7 @@ models/*.pt
 
 # Output
 output/
-*.json
+
 
 # Logs
 *.log
