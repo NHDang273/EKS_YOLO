@@ -67,17 +67,33 @@ jobs:
             exit 1
           fi
 
-          echo "Updating deployment image..."
+          echo "Current deployment status:"
+          kubectl get deployment yolo-inference -n yolo-inference
+
+          echo ""
+          echo "Updating deployment image to: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           kubectl set image deployment/yolo-inference \
             yolo-inference=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -n yolo-inference
 
-          echo "Waiting for rollout (10 min timeout)..."
-          kubectl rollout status deployment/yolo-inference -n yolo-inference --timeout=10m
+          echo ""
+          echo "Restarting deployment to force rollout..."
+          kubectl rollout restart deployment/yolo-inference -n yolo-inference
 
           echo ""
-          echo "Getting pod status..."
-          kubectl get pods -n yolo-inference -l app=yolo-inference
+          echo "Waiting for rollout (15 min timeout)..."
+          if kubectl rollout status deployment/yolo-inference -n yolo-inference --timeout=15m; then
+            echo "✓ Rollout successful!"
+          else
+            echo "✗ Rollout failed or timed out. Checking pod status..."
+            kubectl get pods -n yolo-inference -l app=yolo-inference
+            kubectl describe pods -n yolo-inference -l app=yolo-inference | tail -50
+            exit 1
+          fi
+
+          echo ""
+          echo "Final pod status:"
+          kubectl get pods -n yolo-inference -l app=yolo-inference -o wide
 
           echo ""
           echo "✓ Deployment complete!"

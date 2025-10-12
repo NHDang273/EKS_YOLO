@@ -6,7 +6,7 @@ metadata:
   labels:
     app: yolo-inference
 spec:
-  replicas: 2  # Changed from 3 to 2 (fit 2 GPU nodes)
+  replicas: 4  # Multiple pods can share same GPU node
   selector:
     matchLabels:
       app: yolo-inference
@@ -88,13 +88,12 @@ spec:
 
         resources:
           limits:
-            nvidia.com/gpu: 1  # Request 1 GPU
+            # Remove GPU request to allow multiple pods per GPU node
             memory: "8Gi"
-            cpu: "2"  # Changed from 4 to 2
+            cpu: "2"
           requests:
-            nvidia.com/gpu: 1
             memory: "4Gi"
-            cpu: "1"  # Changed from 2 to 1
+            cpu: "1"
 
         volumeMounts:
         - name: models
