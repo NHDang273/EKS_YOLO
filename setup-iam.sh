@@ -17,31 +17,65 @@ echo "Cluster: $CLUSTER_NAME"
 echo "Region: $AWS_REGION"
 echo "Account: $AWS_ACCOUNT_ID"
 
-# Check if OIDC provider exists
+# Check if cluster exists
 echo ""
-echo "=== Checking OIDC Provider ==="
-OIDC_PROVIDER=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query "cluster.identity.oidc.issuer" --output text 2>/dev/null || echo "")
+echo "=== Checking EKS Cluster ==="
+CLUSTER_STATUS=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.status' --output text 2>/dev/null || echo "NOT_FOUND")
 
-if [ -z "$OIDC_PROVIDER" ]; then
-    echo "ERROR: Cluster not found or no OIDC provider"
+if [ "$CLUSTER_STATUS" == "NOT_FOUND" ]; then
+    echo "ERROR: Cluster '${CLUSTER_NAME}' not found in region ${AWS_REGION}"
+    echo ""
+    echo "Please check:"
+    echo "  1. Cluster name is correct"
+    echo "  2. Region is correct"
+    echo "  3. AWS credentials are valid"
+    echo ""
+    echo "List clusters:"
+    aws eks list-clusters --region ${AWS_REGION}
     exit 1
 fi
 
+if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
+    echo "ERROR: Cluster status is ${CLUSTER_STATUS}, expected ACTIVE"
+    exit 1
+fi
+
+echo "✓ Cluster is ACTIVE"
+
+# Get OIDC provider
+echo ""
+echo "=== Setting up OIDC Provider ==="
+OIDC_PROVIDER=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query "cluster.identity.oidc.issuer" --output text)
 OIDC_PROVIDER_URL=$(echo $OIDC_PROVIDER | sed -e "s/^https:\/\///")
 OIDC_ID=$(echo $OIDC_PROVIDER_URL | rev | cut -d'/' -f1 | rev)
 
-echo "OIDC Provider: $OIDC_PROVIDER_URL"
+echo "OIDC Provider URL: $OIDC_PROVIDER_URL"
 echo "OIDC ID: $OIDC_ID"
 
 # Check if OIDC provider is associated with IAM
-OIDC_EXISTS=$(aws iam list-open-id-connect-providers | grep $OIDC_ID | wc -l)
+OIDC_EXISTS=$(aws iam list-open-id-connect-providers --region ${AWS_REGION} 2>/dev/null | grep -c $OIDC_ID || echo "0")
 
-if [ "$OIDC_EXISTS" -eq "0" ]; then
+if [ "$OIDC_EXISTS" == "0" ]; then
     echo "Creating IAM OIDC identity provider..."
-    eksctl utils associate-iam-oidc-provider \
-        --cluster $CLUSTER_NAME \
-        --region $AWS_REGION \
-        --approve
+
+    # Check if eksctl is available
+    if command -v eksctl &> /dev/null; then
+        eksctl utils associate-iam-oidc-provider \
+            --cluster $CLUSTER_NAME \
+            --region $AWS_REGION \
+            --approve
+    else
+        # Use AWS CLI directly
+        echo "eksctl not found, using AWS CLI..."
+        THUMBPRINT=$(echo | openssl s_client -servername oidc.eks.${AWS_REGION}.amazonaws.com -showcerts -connect oidc.eks.${AWS_REGION}.amazonaws.com:443 2>&- | openssl x509 -fingerprint -sha1 -noout | cut -d'=' -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+
+        aws iam create-open-id-connect-provider \
+            --url $OIDC_PROVIDER \
+            --client-id-list sts.amazonaws.com \
+            --thumbprint-list $THUMBPRINT \
+            --region ${AWS_REGION}
+    fi
+
     echo "✓ OIDC provider created"
 else
     echo "✓ OIDC provider already exists"
