@@ -4,7 +4,7 @@
 # Run this script to configure your environment for YOLO EKS deployment
 
 export AWS_REGION=ap-southeast-1
-export CLUSTER_NAME=yolo-eks-cluster
+export CLUSTER_NAME=yolo-inference-cluster
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export ECR_REPO=ai-inference
 export S3_WEIGHTS_BUCKET=s3-eks-dang
@@ -25,7 +25,7 @@ cat >> ~/.bashrc <<EOF
 
 # YOLO EKS Environment Variables
 export AWS_REGION=ap-southeast-1
-export CLUSTER_NAME=yolo-eks-cluster
+export CLUSTER_NAME=yolo-inference-cluster
 export AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 export ECR_REPO=ai-inference
 export S3_WEIGHTS_BUCKET=s3-eks-dang
