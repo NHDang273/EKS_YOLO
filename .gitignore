@@ -62,6 +62,7 @@ stress-test/test-images/*
 *-temp.json
 aws-auth-current.yaml
 *.kubeconfig
+k8s/*.generated.yaml
 
 # Secrets
 *.key

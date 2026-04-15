@@ -1,31 +1,39 @@
-# GitHub Actions Setup
+# GitHub Actions and CI/CD Access
 
-## Required GitHub Secrets
+This guide describes how to grant GitHub Actions access to the EKS cluster and how CI/CD should interact with this repository.
 
-Go to: **Your GitHub Repo** → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+## Current CI/CD Model
 
-### Secrets to Add:
+The repository currently documents an IAM user based integration:
 
-| Secret Name | Value | Example |
-|-------------|-------|---------|
-| `AWS_ACCESS_KEY_ID` | IAM user access key | `AKIA...` |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret key | `(secret)` |
-| `AWS_REGION` | AWS region | `ap-southeast-1` |
-| `ECR_REPOSITORY` | ECR repo name | `yolo-test` |
-| `EKS_CLUSTER_NAME` | EKS cluster name | `yolo-inference-cluster` |
-| `S3_MODEL_BUCKET` | S3 bucket name | `s3-eks-dang` |
+- IAM user: `github-actions-user`
+- cluster access: mapped into `aws-auth` through `eksctl`
+- deployment path: render manifests and run the same update flow used locally
 
-⚠️ **Important:**
-- `ECR_REPOSITORY`: Only repository name, NOT full URL
-- `S3_MODEL_BUCKET`: Only bucket name, without `s3://` prefix
+This works, but it is not the strongest long-term production model. A role-based CI/CD path would be preferable.
 
-## Create IAM User for GitHub Actions
+## Required Repository Secrets
+
+Add these repository secrets in GitHub Actions:
+
+`Settings` -> `Secrets and variables` -> `Actions`
+
+| Secret Name | Purpose |
+|-------------|---------|
+| `AWS_ACCESS_KEY_ID` | IAM user access key |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
+| `AWS_REGION` | cluster region |
+| `ECR_REPOSITORY` | image repository name |
+| `EKS_CLUSTER_NAME` | target EKS cluster |
+| `S3_MODEL_BUCKET` | bucket containing model weights |
+
+Keep these aligned with the environment values used locally.
+
+## Create the IAM User
 
 ```bash
-# 1. Create IAM user
 aws iam create-user --user-name github-actions-user
 
-# 2. Attach policies
 aws iam attach-user-policy \
   --user-name github-actions-user \
   --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
@@ -34,94 +42,64 @@ aws iam attach-user-policy \
   --user-name github-actions-user \
   --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
 
-# 3. Create access key
 aws iam create-access-key --user-name github-actions-user
 ```
 
-Save the Access Key ID and Secret Access Key to GitHub Secrets.
+Store the generated access key and secret in GitHub repository secrets.
 
-## Workflow File
+## Grant Cluster Access
 
-The workflow is defined in `.github/workflows/deploy.yml`:
-
-```yaml
-name: Build and Deploy to EKS
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      # ... build and deploy steps
-```
-
-## Trigger Deployment
-
-### Automatic (on push):
-```bash
-git add .
-git commit -m "Update deployment"
-git push origin main
-```
-
-### Manual:
-1. Go to: `https://github.com/YOUR_USERNAME/YOUR_REPO/actions`
-2. Click "Build and Deploy to EKS"
-3. Click "Run workflow" → Select `main` branch
-4. Click "Run workflow"
-
-## Verify Deployment
-
-After GitHub Actions completes (~5-10 min):
+After the cluster exists, run:
 
 ```bash
-# Check deployment status
+./scripts/setup-github.sh
+```
+
+This script:
+
+- updates kubeconfig
+- verifies or creates the IAM identity mapping
+- maps `github-actions-user` into `aws-auth`
+- prints the GitHub secret values that must stay aligned with `.env`
+
+Verify the mapping:
+
+```bash
+kubectl get configmap aws-auth -n kube-system
+```
+
+## CI/CD Responsibilities
+
+The workflow should:
+
+1. build the Docker image
+2. push the image to ECR
+3. authenticate to AWS
+4. update kubeconfig for the target cluster
+5. render manifests using `./scripts/render-manifests.sh`
+6. deploy using the same logic as local updates, preferably `./scripts/update.sh`
+
+This keeps CI/CD behavior aligned with operator behavior and reduces configuration drift.
+
+## Post-Run Verification
+
+After a workflow completes:
+
+```bash
 kubectl rollout status deployment/yolo-inference -n yolo-inference
-
-# Get LoadBalancer URL
+kubectl get pods -n yolo-inference
 kubectl get svc yolo-service -n yolo-inference
-
-# Test API
-curl http://<LOADBALANCER_URL>/health
 ```
 
-## Troubleshooting
+## Production Concerns
 
-### ECR push fails
-```bash
-# Verify ECR repo exists
-aws ecr describe-repositories --repository-names yolo-test --region ap-southeast-1
+Current concerns with the documented CI/CD path:
 
-# Create if missing
-aws ecr create-repository --repository-name yolo-test --region ap-southeast-1
-```
+- `setup-github.sh` maps the CI identity to `system:masters`
+- the flow is IAM user based instead of role based
+- permissions are broader than least-privilege production practice
 
-### EKS deployment fails
-```bash
-# Check cluster exists
-eksctl get cluster --name yolo-inference-cluster --region ap-southeast-1
+Recommended next step:
 
-# Update kubeconfig
-aws eks update-kubeconfig --name yolo-inference-cluster --region ap-southeast-1
-
-# Check kubectl access
-kubectl get nodes
-```
-
-### Secrets not working
-- Verify secret names match exactly (case-sensitive)
-- Check workflow file references: `${{ secrets.SECRET_NAME }}`
-- Re-create secrets if needed
+- replace IAM user credentials with a role-based GitHub federation pattern
+- reduce cluster access from `system:masters` to the minimum operational scope

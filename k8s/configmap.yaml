@@ -4,18 +4,9 @@ metadata:
   name: yolo-config
   namespace: yolo-inference
 data:
-  # S3 bucket where models are stored
-  S3_BUCKET: "s3-eks-dang"
-  S3_MODEL_KEY: "models/best.pt"
-
-  # AWS Region
-  AWS_REGION: "ap-southeast-1"
-
-  # Path to model file in EFS (mounted from S3)
-  MODEL_PATH: "/models/best.pt"
-
-  # Path to shared output directory in EFS
-  OUTPUT_PATH: "/output"
-
-  # CUDA settings
-  CUDA_VISIBLE_DEVICES: "0"
+  S3_BUCKET: "${S3_BUCKET}"
+  S3_MODEL_KEY: "${S3_MODEL_KEY}"
+  AWS_REGION: "${AWS_REGION}"
+  MODEL_PATH: "${MODEL_PATH}"
+  OUTPUT_PATH: "${OUTPUT_PATH}"
+  INFERENCE_DEVICE: "${INFERENCE_DEVICE}"

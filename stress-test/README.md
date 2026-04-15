@@ -1,64 +1,117 @@
-# Stress Test
+# Stress Test Guide
 
-Test auto-scaling của YOLO API.
+Use this directory to validate request distribution, HPA behavior, and basic service stability.
 
-## Cách dùng
+## Before You Start
 
-### 1. Tự động lấy LoadBalancer URL:
+Run from this directory:
+
+```bash
+cd stress-test
+```
+
+Confirm the service is reachable:
+
+```bash
+kubectl get svc yolo-service -n yolo-inference
+```
+
+## Basic Usage
+
+### Auto-discover the LoadBalancer URL
+
 ```bash
 python test.py --images test-images --concurrent 10 --total 100
 ```
 
-### 2. Hoặc chỉ định URL thủ công:
+### Provide the URL manually
+
 ```bash
 python test.py --url http://abc123.elb.amazonaws.com --images test-images --concurrent 10 --total 100
 ```
 
-### 3. Test theo thời gian:
+### Run for a fixed duration
+
 ```bash
-# Test trong 5 phút
 python test.py --images test-images --concurrent 10 --duration 300
 ```
 
-## Tham số
+## Arguments
 
-- `--url`: API URL (không cần nếu kubectl đã config)
-- `--images`: Thư mục chứa ảnh test (mặc định: test-images)
-- `--concurrent`: Số request đồng thời (mặc định: 5)
-- `--total`: Tổng số request
-- `--duration`: Thời gian test (giây)
+- `--url`: API base URL. Optional if `kubectl` points at the correct cluster.
+- `--images`: directory containing test images. Default is `test-images`.
+- `--concurrent`: number of concurrent requests. Default is `5`.
+- `--total`: total request count.
+- `--duration`: test duration in seconds.
 
-## Lấy LoadBalancer URL thủ công
+## Recommended Test Sequence
+
+### 1. Smoke test
 
 ```bash
-# Hostname
+python test.py --concurrent 5 --total 20
+```
+
+Expected outcome:
+
+- requests succeed consistently
+- response payloads contain pod names
+- no pod restarts occur
+
+### 2. Distribution test
+
+```bash
+python test.py --concurrent 10 --total 100
+```
+
+Expected outcome:
+
+- requests are spread across multiple pods when replicas are available
+- latency remains stable enough for the target workload
+
+### 3. Scaling test
+
+```bash
+python test.py --concurrent 20 --duration 180
+```
+
+Expected outcome:
+
+- HPA metrics move upward
+- pod replicas increase when thresholds are crossed
+- cluster autoscaler adds capacity if scheduling requires it
+
+## Observe the System While Testing
+
+In separate terminals:
+
+```bash
+kubectl get pods -n yolo-inference -w
+kubectl get hpa yolo-hpa -n yolo-inference -w
+kubectl get nodes -o wide
+kubectl logs -n yolo-inference -l app=yolo-inference --tail=50
+```
+
+## Manual Service Endpoint Lookup
+
+```bash
 kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
-# Hoặc IP
-kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
-## Ví dụ
+## Interpreting Results
+
+Watch for:
+
+- failed requests or non-200 responses
+- repeated pod restarts
+- long cold-start delays after scale-out
+- HPA stuck with no metrics
+- pending pods caused by insufficient node capacity
+
+If scaling does not happen, inspect:
 
 ```bash
-# Test nhanh
-python test.py --concurrent 5 --total 50
-
-# Test stress cao
-python test.py --concurrent 20 --total 500
-
-# Test liên tục 10 phút
-python test.py --concurrent 10 --duration 600
-```
-Bước 1: Test nhẹ trước (5 concurrent, 20 requests)
-```
-cd stress-test
-
-python test.py --url http://a11fb22be55d1404dbcb55968c2fe89c-4358812860332e95.elb.ap-southeast-1.amazonaws.com --concurrent 5 --total 20
-```
-
-Bước 2: Test stress để trigger auto-scaling
-```
-# Tăng mạnh: 20 concurrent requests trong 3 phút
-python test.py --url http://a11fb22be55d1404dbcb55968c2fe89c-4358812860332e95.elb.ap-southeast-1.amazonaws.com --concurrent 20 --duration 180
+kubectl describe hpa yolo-hpa -n yolo-inference
+kubectl get pods -n kube-system | grep metrics-server
+kubectl logs -n kube-system -l app=cluster-autoscaler --tail=100
 ```

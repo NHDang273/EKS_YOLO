@@ -6,7 +6,7 @@ metadata:
   labels:
     app: yolo-inference
 spec:
-  replicas: 2  # Start with 2 pods on 1 GPU node
+  replicas: ${DEPLOYMENT_REPLICAS}
   selector:
     matchLabels:
       app: yolo-inference
@@ -79,8 +79,7 @@ spec:
 
       containers:
       - name: yolo-inference
-        # Using yolo-test repo (actual ECR repo name)
-        image: 688567276212.dkr.ecr.ap-southeast-1.amazonaws.com/yolo-test:latest
+        image: ${ECR_URL}:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -88,12 +87,11 @@ spec:
 
         resources:
           limits:
-            # Remove GPU request to allow multiple pods per GPU node
-            memory: "8Gi"
-            cpu: "2"
+            memory: "${MEMORY_LIMIT}"
+            cpu: "${CPU_LIMIT}"
           requests:
-            memory: "4Gi"
-            cpu: "1"
+            memory: "${MEMORY_REQUEST}"
+            cpu: "${CPU_REQUEST}"
 
         volumeMounts:
         - name: models
@@ -116,11 +114,11 @@ spec:
             configMapKeyRef:
               name: yolo-config
               key: OUTPUT_PATH
-        - name: CUDA_VISIBLE_DEVICES
+        - name: INFERENCE_DEVICE
           valueFrom:
             configMapKeyRef:
               name: yolo-config
-              key: CUDA_VISIBLE_DEVICES
+              key: INFERENCE_DEVICE
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -167,17 +165,9 @@ spec:
       - name: tmp
         emptyDir: {}
 
-      # Schedule pods on GPU nodes
       nodeSelector:
-        node.kubernetes.io/instance-type: g4dn.xlarge
+        node.kubernetes.io/instance-type: ${INFERENCE_NODE_INSTANCE_TYPE}
 
-      # Tolerate GPU taints
-      tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
-
-      # Anti-affinity to spread pods across nodes
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

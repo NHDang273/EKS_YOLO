@@ -2,8 +2,8 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: yolo-inference-cluster
-  region: ap-southeast-1
+  name: ${CLUSTER_NAME}
+  region: ${AWS_REGION}
   version: "1.28"
 
 # IAM OIDC & Service Account
@@ -15,7 +15,6 @@ iam:
       namespace: yolo-inference
     attachPolicyARNs:
     - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
-    - arn:aws:iam::aws:policy/AmazonElasticFileSystemClientReadWriteAccess
 
 # VPC Configuration
 vpc:
@@ -28,12 +27,11 @@ vpc:
 
 # Managed Node Groups
 managedNodeGroups:
-  # GPU Node Group for YOLO inference
-  - name: gpu-nodes
-    instanceType: g4dn.xlarge
-    desiredCapacity: 1  # Start with 1 GPU node
-    minSize: 1          # Min 1 GPU node
-    maxSize: 5          # Max 5 GPU nodes (autoscale when needed)
+  - name: inference-nodes
+    instanceType: ${INFERENCE_NODE_INSTANCE_TYPE}
+    desiredCapacity: ${INFERENCE_NODE_MIN_SIZE}
+    minSize: ${INFERENCE_NODE_MIN_SIZE}
+    maxSize: ${INFERENCE_NODE_MAX_SIZE}
     volumeSize: 100
     volumeType: gp3
     amiFamily: AmazonLinux2
@@ -45,23 +43,18 @@ managedNodeGroups:
         albIngress: true
         cloudWatch: true
     labels:
-      role: gpu-worker
+      role: inference-worker
       workload: yolo-inference
     tags:
-      nodegroup-role: gpu-inference
+      nodegroup-role: cpu-inference
       k8s.io/cluster-autoscaler/enabled: "true"
-      k8s.io/cluster-autoscaler/yolo-inference-cluster: "owned"
-    # Uncomment ssh if needed
-    # ssh:
-    #   allow: true
-    #   publicKeyPath: ~/.ssh/id_rsa.pub
+      k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
 
-  # CPU Node Group for system workloads
   - name: cpu-nodes
-    instanceType: t3.medium
-    desiredCapacity: 2
-    minSize: 2
-    maxSize: 4
+    instanceType: ${SYSTEM_NODE_INSTANCE_TYPE}
+    desiredCapacity: ${SYSTEM_NODE_MIN_SIZE}
+    minSize: ${SYSTEM_NODE_MIN_SIZE}
+    maxSize: ${SYSTEM_NODE_MAX_SIZE}
     volumeSize: 50
     volumeType: gp3
     amiFamily: AmazonLinux2
@@ -77,7 +70,7 @@ managedNodeGroups:
     tags:
       nodegroup-role: system
       k8s.io/cluster-autoscaler/enabled: "true"
-      k8s.io/cluster-autoscaler/yolo-inference-cluster: "owned"
+      k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
 
 # Addons
 addons:
@@ -87,7 +80,3 @@ addons:
     version: latest
   - name: kube-proxy
     version: latest
-  - name: aws-ebs-csi-driver
-    version: latest
-    wellKnownPolicies:
-      ebsCSIController: true

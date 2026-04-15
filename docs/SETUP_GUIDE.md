@@ -1,176 +1,153 @@
-# YOLO EKS Deployment Guide
+# Deployment Guide
+
+This guide is for the first successful environment bring-up.
+
+## Files Used In This Flow
+
+- [`.env.example`](/Users/nguyenhaidang/Workspace/EKS_YOLO/.env.example:1): source template for `.env`
+- [scripts/render-manifests.sh](/Users/nguyenhaidang/Workspace/EKS_YOLO/scripts/render-manifests.sh): renders cluster and workload templates
+- [k8s/cluster-config.yaml](/Users/nguyenhaidang/Workspace/EKS_YOLO/k8s/cluster-config.yaml): cluster template consumed by `eksctl`
+- [scripts/deploy.sh](/Users/nguyenhaidang/Workspace/EKS_YOLO/scripts/deploy.sh): creates EFS if needed and deploys workload
 
 ## Prerequisites
-- EKS cluster đã được tạo
-- kubectl configured
-- AWS CLI configured
-- Helm installed
-- S3 bucket chứa model weights
 
-## Deployment Steps
+- `aws`, `kubectl`, `eksctl`, and `helm` are installed and available on `PATH`
+- the active AWS identity has permission to create and manage EKS, IAM, EFS, and related networking resources
+- the YOLO model is already uploaded to S3
+- `.env` has been reviewed and updated for the target environment
 
-### Step 1: Setup IAM Permissions (Run ONCE)
+Recommended checks:
+
 ```bash
-chmod +x setup-iam.sh
-./setup-iam.sh
+aws sts get-caller-identity
+kubectl version --client
+eksctl version
+helm version
 ```
 
-**Việc này sẽ:**
-- Tạo IAM OIDC provider cho EKS cluster
-- Tạo IAM policy cho phép read S3 bucket
-- Tạo IAM role `yolo-eks-pod-role` với trust relationship
-- Attach policy vào role
+## Environment Review
 
-**Output:**
-```
-✓ IAM Setup Complete!
-Role ARN: arn:aws:iam::688567276212:role/yolo-eks-pod-role
-```
+Copy the template if needed:
 
-### Step 2: Deploy Infrastructure
 ```bash
-chmod +x deploy.sh
-./deploy.sh
+cp .env.example .env
 ```
 
-**Việc này sẽ:**
-- Kiểm tra IAM role đã tạo chưa
-- Tạo EFS file system + mount targets
-- Install Kubernetes addons:
-  - EFS CSI Driver
-  - NVIDIA Device Plugin
-  - Metrics Server
-- Update manifests với actual values
-- Deploy all K8s resources
+Review at least:
 
-### Step 3: Trigger GitHub Actions
-1. Go to: https://github.com/YOUR_USERNAME/YOUR_REPO/actions
-2. Click "Build and Deploy to EKS"
-3. Click "Run workflow" → Run on `main`
+- `AWS_REGION`
+- `CLUSTER_NAME`
+- `ECR_REPOSITORY`
+- `S3_BUCKET`
+- `S3_MODEL_KEY`
+- `INFERENCE_NODE_INSTANCE_TYPE`
+- `SYSTEM_NODE_INSTANCE_TYPE`
+- `DEPLOYMENT_REPLICAS`
+- `CPU_REQUEST`
+- `CPU_LIMIT`
+- `MEMORY_REQUEST`
+- `MEMORY_LIMIT`
 
-**GitHub Actions sẽ:**
-- Build Docker image
-- Push to ECR
-- Trigger rolling update of deployment
+Storage behavior:
 
-### Step 4: Verify Deployment
+- leave `EFS_ID` empty if the first deploy should create EFS
+- set `EFS_ID` if you want to reuse an existing EFS file system
+
+## Create the Cluster
+
+Render the cluster config and create the cluster:
+
 ```bash
-# Check pods
+RENDER_DIR=$(mktemp -d)
+./scripts/render-manifests.sh "$RENDER_DIR"
+eksctl create cluster -f "$RENDER_DIR/cluster-config.yaml"
+```
+
+Result:
+
+- EKS cluster
+- OIDC-enabled IAM integration
+- `yolo-sa`
+- system and inference node groups
+
+Verify cluster bootstrap:
+
+```bash
+kubectl get nodes
+kubectl get serviceaccount yolo-sa -n yolo-inference
+```
+
+## Deploy the Workload
+
+Run:
+
+```bash
+./scripts/deploy.sh
+```
+
+High level:
+
+- verify cluster access
+- create or reuse EFS
+- install required addons
+- render manifests
+- apply workload resources
+
+If a new EFS file system is created, persist the printed `EFS_ID` into `.env` for future deployments.
+
+## Validate the Deployment
+
+Run:
+
+```bash
 kubectl get pods -n yolo-inference -w
+kubectl get hpa yolo-hpa -n yolo-inference
+kubectl get svc yolo-service -n yolo-inference
+kubectl get pods -n kube-system | grep -E 'metrics-server|efs|cluster-autoscaler'
+```
 
-# Check logs
-kubectl logs -n yolo-inference -l app=yolo-inference
+Then test the API:
 
-# Get LoadBalancer URL
+```bash
 LB_URL=$(kubectl get svc yolo-service -n yolo-inference -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-echo $LB_URL
-
-# Test health endpoint
-curl http://$LB_URL/health | jq '.'
+curl "http://$LB_URL/health"
 ```
 
-## Troubleshooting
+## Updating an Existing Environment
 
-### Init Container fails with S3 permission denied
+Use:
+
 ```bash
-# Check IAM role
+./scripts/update.sh
+```
+
+This is the normal day-2 path for applying rendered config changes and restarting the deployment.
+
+## Common Failure Modes
+
+### Missing service account
+
+```bash
+kubectl get serviceaccount yolo-sa -n yolo-inference
+```
+
+If missing, fix the cluster creation path instead of trying to patch workload IAM manually.
+
+### Model download failure
+
+```bash
+kubectl logs -n yolo-inference <pod-name> -c model-downloader
 kubectl describe sa yolo-sa -n yolo-inference
-
-# Should see annotation:
-# eks.amazonaws.com/role-arn: arn:aws:iam::688567276212:role/yolo-eks-pod-role
-
-# Check pod has correct service account
-kubectl get pod <POD_NAME> -n yolo-inference -o yaml | grep serviceAccount
 ```
 
-### EFS mount fails
-```bash
-# Check EFS CSI driver
-kubectl get pods -n kube-system | grep efs
+Validate the bucket, object key, and IRSA permissions.
 
-# Check PVC status
+### EFS mount failure
+
+```bash
 kubectl get pvc -n yolo-inference
-
-# Check StorageClass
 kubectl describe sc efs-sc
+kubectl get pods -n kube-system | grep efs
 ```
 
-### Pod stuck in Pending
-```bash
-# Check events
-kubectl describe pod <POD_NAME> -n yolo-inference
-
-# Common issues:
-# - No GPU nodes available
-# - EFS mount timeout
-# - Image pull error
-```
-
-## Files Structure
-
-```
-k8s/
-├── iam-policy.json           # S3 read permissions
-├── iam-trust-policy.json     # OIDC trust relationship
-├── namespace.yaml            # yolo-inference namespace
-├── serviceaccount.yaml       # SA with IAM role annotation
-├── storageclass.yaml         # EFS storage class
-├── pvc.yaml                  # PVCs for models & output
-├── configmap.yaml            # Environment configs
-├── deployment.yaml           # Main deployment
-├── service.yaml              # LoadBalancer service
-└── hpa.yaml                  # Horizontal Pod Autoscaler
-
-setup-iam.sh                  # Setup IAM (run once)
-deploy.sh                     # Deploy infrastructure
-```
-
-## Configuration Details
-
-### IAM Permissions
-- **Policy**: `yolo-s3-read-policy`
-  - s3:GetObject
-  - s3:ListBucket
-- **Role**: `yolo-eks-pod-role`
-  - Trust: EKS OIDC provider
-  - Service Account: `yolo-inference/yolo-sa`
-
-### EFS Configuration
-- **Provisioning Mode**: `efs-ap` (Access Points)
-- **Base Path**: `/` (root)
-- **Directory Permissions**: `700`
-- **UID/GID**: `1000:1000`
-- **Mount Options**: TLS encryption
-
-### Init Container
-- **Image**: `amazon/aws-cli:latest`
-- **Purpose**: Download model from S3 to EFS
-- **IAM**: Uses ServiceAccount role
-- **Logic**:
-  1. Check if model exists in EFS
-  2. Download from S3 if missing or update
-  3. Set permissions (644)
-
-## Clean Up
-
-```bash
-# Delete deployment
-kubectl delete -f k8s/
-
-# Delete EFS
-EFS_ID=$(aws efs describe-file-systems --query 'FileSystems[?Name==`yolo-efs`].FileSystemId' --output text)
-aws efs delete-file-system --file-system-id $EFS_ID
-
-# Delete IAM resources
-aws iam detach-role-policy --role-name yolo-eks-pod-role --policy-arn $(aws iam list-policies --query 'Policies[?PolicyName==`yolo-s3-read-policy`].Arn' --output text)
-aws iam delete-role --role-name yolo-eks-pod-role
-aws iam delete-policy --policy-arn $(aws iam list-policies --query 'Policies[?PolicyName==`yolo-s3-read-policy`].Arn' --output text)
-```
-
-## Notes
-
-1. **IAM Setup**: Chỉ cần chạy `setup-iam.sh` một lần duy nhất
-2. **EFS Access Points**: Tự động tạo bởi CSI driver khi tạo PVC
-3. **Model Download**: Init container chạy mỗi khi pod restart
-4. **Security**: Pods run as non-root user (UID 1000)
-5. **GPU Scheduling**: Pods chỉ schedule trên g4dn.xlarge nodes
+Validate that `EFS_ID` exists in the same AWS region as the cluster.

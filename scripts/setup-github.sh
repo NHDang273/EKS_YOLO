@@ -9,9 +9,10 @@ echo "=========================================="
 echo "  Setup GitHub Actions Access to EKS"
 echo "=========================================="
 
-# Load environment
-cd ~/desktop/Auto_Scale_GPU_EKS
-source ./setup-env.sh
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+cd "${REPO_ROOT}"
+YOLO_ENV_SILENT=1 source "${SCRIPT_DIR}/setup-env.sh"
 
 echo "Cluster: $CLUSTER_NAME"
 echo "Region: $AWS_REGION"
@@ -83,7 +84,7 @@ echo "GitHub Secrets should have:"
 echo "  AWS_ACCESS_KEY_ID: <from access key above>"
 echo "  AWS_SECRET_ACCESS_KEY: <from access key above>"
 echo "  AWS_REGION: $AWS_REGION"
-echo "  ECR_REPOSITORY: ai-inference"
+echo "  ECR_REPOSITORY: $ECR_REPOSITORY"
 echo "  EKS_CLUSTER_NAME: $CLUSTER_NAME"
-echo "  S3_MODEL_BUCKET: $S3_WEIGHTS_BUCKET"
+echo "  S3_MODEL_BUCKET: $S3_BUCKET"
 echo ""

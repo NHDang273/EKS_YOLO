@@ -20,6 +20,7 @@ app = FastAPI(title="YOLO Inference API")
 MODEL_PATH = os.getenv('MODEL_PATH', '/models/best.pt')
 OUTPUT_PATH = os.getenv('OUTPUT_PATH', '/output')
 POD_NAME = os.getenv('POD_NAME', 'local')
+INFERENCE_DEVICE = os.getenv('INFERENCE_DEVICE', 'cpu')
 
 # Create output directory if it doesn't exist
 os.makedirs(OUTPUT_PATH, exist_ok=True)
@@ -27,9 +28,9 @@ os.makedirs(OUTPUT_PATH, exist_ok=True)
 print(f"Loading YOLO model from: {MODEL_PATH}")
 model = YOLO(MODEL_PATH)
 
-# Set device to GPU
-model.to('cuda')
-print(f"Model loaded successfully on GPU. Pod: {POD_NAME}")
+# Set device from environment. Default is CPU for EKS deployment.
+model.to(INFERENCE_DEVICE)
+print(f"Model loaded successfully on {INFERENCE_DEVICE}. Pod: {POD_NAME}")
 
 @app.get("/health")
 async def health():
@@ -38,7 +39,8 @@ async def health():
         "status": "healthy",
         "model_path": MODEL_PATH,
         "pod_name": POD_NAME,
-        "output_path": OUTPUT_PATH
+        "output_path": OUTPUT_PATH,
+        "inference_device": INFERENCE_DEVICE
     }
 
 @app.get("/")
@@ -46,7 +48,8 @@ async def root():
     return {
         "message": "YOLO Inference API is running",
         "pod": POD_NAME,
-        "model": MODEL_PATH
+        "model": MODEL_PATH,
+        "inference_device": INFERENCE_DEVICE
     }
 
 @app.post("/predict")

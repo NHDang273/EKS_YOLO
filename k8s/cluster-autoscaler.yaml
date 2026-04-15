@@ -156,7 +156,7 @@ spec:
             - --cloud-provider=aws
             - --skip-nodes-with-local-storage=false
             - --expander=least-waste
-            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/yolo-inference-cluster
+            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/${CLUSTER_NAME}
             - --balance-similar-node-groups
             - --skip-nodes-with-system-pods=false
           volumeMounts:
@@ -175,4 +175,4 @@ spec:
           hostPath:
             path: "/etc/ssl/certs/ca-bundle.crt"
       nodeSelector:
-        node.kubernetes.io/instance-type: t3.medium
+        node.kubernetes.io/instance-type: ${SYSTEM_NODE_INSTANCE_TYPE}

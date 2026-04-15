@@ -33,11 +33,11 @@ while true; do
         awk '{printf "%-50s %-10s %-10s\n", $1, $2, $3}'
 
     echo ""
-    echo "=== GPU Nodes Count ==="
-    GPU_NODES=$(kubectl get nodes -l node.kubernetes.io/instance-type=g4dn.xlarge --no-headers | wc -l)
-    CPU_NODES=$(kubectl get nodes -l node.kubernetes.io/instance-type=t3.medium --no-headers | wc -l)
-    echo "  GPU nodes (g4dn.xlarge): $GPU_NODES"
-    echo "  CPU nodes (t3.medium): $CPU_NODES"
+    echo "=== Node Group Counts ==="
+    INFERENCE_NODES=$(kubectl get nodes -l node.kubernetes.io/instance-type=t3.large --no-headers | wc -l)
+    SYSTEM_NODES=$(kubectl get nodes -l node.kubernetes.io/instance-type=t3.medium --no-headers | wc -l)
+    echo "  Inference nodes (t3.large): $INFERENCE_NODES"
+    echo "  System nodes (t3.medium): $SYSTEM_NODES"
 
     echo ""
     echo "=== Cluster Autoscaler Logs (last 3 lines) ==="

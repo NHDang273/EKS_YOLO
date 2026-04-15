@@ -1,19 +1,15 @@
 #!/bin/bash
 
-# YOLO EKS Deployment Script
-# This script deploys infrastructure to EKS (without building Docker image)
-# Docker image will be built by GitHub Actions
-
-# Don't exit on error - handle errors gracefully
-set +e
+set -euo pipefail
 
 echo "=========================================="
 echo "  YOLO EKS Infrastructure Deployment"
 echo "=========================================="
 
-# Load environment
-cd ~/desktop/Auto_Scale_GPU_EKS
-source ./setup-env.sh
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+cd "${REPO_ROOT}"
+YOLO_ENV_SILENT=1 source "${SCRIPT_DIR}/setup-env.sh"
 
 echo ""
 echo "Environment:"
@@ -21,7 +17,7 @@ echo "  AWS Region: $AWS_REGION"
 echo "  Cluster: $CLUSTER_NAME"
 echo "  Account ID: $AWS_ACCOUNT_ID"
 echo "  ECR: $ECR_URL"
-echo "  S3 Bucket: $S3_WEIGHTS_BUCKET"
+echo "  S3 Bucket: $S3_BUCKET"
 
 # Verify cluster
 echo ""
@@ -33,48 +29,52 @@ kubectl get nodes || {
 }
 
 echo ""
-echo "=== Step 2: Checking IAM Role for Service Account ==="
+echo "=== Step 2: Verifying IRSA-managed Service Account ==="
 
-# Check if IAM role exists
-ROLE_EXISTS=$(aws iam get-role --role-name yolo-eks-pod-role 2>/dev/null | wc -l)
-if [ "$ROLE_EXISTS" -eq "0" ]; then
-    echo "⚠️  IAM role not found. Please run ./setup-iam.sh first!"
+kubectl get serviceaccount yolo-sa -n yolo-inference >/dev/null 2>&1 || {
+    echo "ERROR: ServiceAccount yolo-sa not found in namespace yolo-inference"
+    echo "Create the cluster using the rendered eksctl config first."
     exit 1
-else
-    echo "✓ IAM Role exists: yolo-eks-pod-role"
-fi
+}
+
+echo "✓ ServiceAccount exists: yolo-sa"
 
 echo ""
 echo "=== Step 3: Creating EFS File System ==="
-VPC_ID=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.vpcId' --output text)
-echo "VPC: $VPC_ID"
+if [ -n "${EFS_ID:-}" ]; then
+    echo "Using existing EFS: ${EFS_ID}"
+else
+    VPC_ID=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+    echo "VPC: $VPC_ID"
 
-EFS_ID=$(aws efs create-file-system \
-    --creation-token yolo-efs-$(date +%s) \
-    --performance-mode generalPurpose \
-    --encrypted \
-    --tags Key=Name,Value=yolo-efs \
-    --region ${AWS_REGION} \
-    --query 'FileSystemId' \
-    --output text)
+    EFS_ID=$(aws efs create-file-system \
+        --creation-token "yolo-efs-$(date +%s)" \
+        --performance-mode generalPurpose \
+        --encrypted \
+        --tags Key=Name,Value=yolo-efs \
+        --region "${AWS_REGION}" \
+        --query 'FileSystemId' \
+        --output text)
+    export EFS_ID
 
-echo "EFS ID: $EFS_ID"
-export EFS_ID=$EFS_ID
+    echo "Created EFS: ${EFS_ID}"
+    echo "Persist this value in .env as EFS_ID to reuse the same file system on later deploys."
 
-sleep 30
+    sleep 30
 
-CLUSTER_SG=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
-SUBNET_IDS=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.subnetIds' --output text)
+    CLUSTER_SG=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+    SUBNET_IDS=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${AWS_REGION}" --query 'cluster.resourcesVpcConfig.subnetIds' --output text)
 
-echo "Creating EFS mount targets..."
-for subnet in $SUBNET_IDS; do
-    aws efs create-mount-target \
-        --file-system-id $EFS_ID \
-        --subnet-id $subnet \
-        --security-groups $CLUSTER_SG \
-        --region ${AWS_REGION} 2>/dev/null || true
-done
-echo "✓ EFS created"
+    echo "Creating EFS mount targets..."
+    for subnet in $SUBNET_IDS; do
+        aws efs create-mount-target \
+            --file-system-id "${EFS_ID}" \
+            --subnet-id "${subnet}" \
+            --security-groups "${CLUSTER_SG}" \
+            --region "${AWS_REGION}" 2>/dev/null || true
+    done
+    echo "✓ EFS created"
+fi
 
 echo ""
 echo "=== Step 4: Installing Kubernetes Addons ==="
@@ -83,12 +83,10 @@ helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-d
 helm repo update
 
 echo "Installing EFS CSI Driver..."
-helm install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
+helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
     --namespace kube-system \
+    --create-namespace \
     --set image.repository=602401143452.dkr.ecr.${AWS_REGION}.amazonaws.com/eks/aws-efs-csi-driver
-
-echo "Installing NVIDIA Device Plugin..."
-kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.0/nvidia-device-plugin.yml
 
 echo "Installing Metrics Server..."
 # Remove old Metrics Server if exists to avoid conflicts
@@ -106,27 +104,24 @@ sleep 20
 echo "✓ Addons installed"
 
 echo ""
-echo "=== Step 5: Updating Kubernetes Manifests ==="
-
-sed -i "s/fs-XXXXXXXXX/${EFS_ID}/g" k8s/storageclass.yaml
-sed -i "s/ACCOUNT_ID/${AWS_ACCOUNT_ID}/g" k8s/serviceaccount.yaml
-sed -i "s|ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com|${ECR_URL}|g" k8s/deployment.yaml
-sed -i "s/yolo-models-bucket/${S3_WEIGHTS_BUCKET}/g" k8s/configmap.yaml
-sed -i "s/us-west-2/${AWS_REGION}/g" k8s/configmap.yaml
-
-echo "✓ Manifests updated"
+echo "=== Step 5: Rendering Kubernetes Manifests ==="
+RENDER_DIR=$(mktemp -d)
+trap 'rm -rf "${RENDER_DIR}"' EXIT
+export EFS_ID
+"${SCRIPT_DIR}/render-manifests.sh" "${RENDER_DIR}"
+echo "✓ Rendered manifests: ${RENDER_DIR}"
 
 echo ""
 echo "=== Step 6: Deploying to EKS ==="
 
 kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/storageclass.yaml
+kubectl apply -f "${RENDER_DIR}/storageclass.yaml"
 kubectl apply -f k8s/pvc.yaml
-kubectl apply -f k8s/serviceaccount.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/deployment.yaml
+kubectl apply -f "${RENDER_DIR}/configmap.yaml"
+kubectl apply -f "${RENDER_DIR}/deployment.yaml"
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/hpa.yaml
+kubectl apply -f "${RENDER_DIR}/cluster-autoscaler.yaml"
 
 echo "✓ Infrastructure deployed"
 
